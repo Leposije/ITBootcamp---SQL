@@ -113,3 +113,33 @@ ORDER BY procenat desc;
 -- 10. Који тренер је освојио највише бодова у утакмицама у којима је његов тим губио на
 -- полувремену? Рачунајте и домаће и гостујуће утакмице.
 
+WITH sides AS (
+  SELECT match_id, kickoff_ts, home_team_id AS team_id,
+         home_goals AS goals_for, away_goals AS goals_against,
+         home_goals_ht AS ht_for, away_goals_ht AS ht_against
+  FROM matches
+  WHERE status = 'played'
+  UNION ALL
+  SELECT match_id, kickoff_ts, away_team_id,
+         away_goals, home_goals,
+         away_goals_ht, home_goals_ht
+  FROM matches
+  WHERE status = 'played'
+)
+SELECT ms.manager_name AS trener, t.team_name AS klub,
+       COUNT(*) AS utakmica_gubio_na_poluvremenu,
+       SUM(CASE WHEN s.goals_for > s.goals_against THEN 1 ELSE 0 END) AS pobede,
+       SUM(CASE WHEN s.goals_for = s.goals_against THEN 1 ELSE 0 END) AS nereseno,
+       SUM(CASE WHEN s.goals_for < s.goals_against THEN 1 ELSE 0 END) AS porazi,
+       SUM(CASE WHEN s.goals_for > s.goals_against THEN 3
+         WHEN s.goals_for = s.goals_against THEN 1 ELSE 0 END) AS bodovi
+from sides s
+JOIN manager_spells m ON ms.team_id = s.team_id
+   AND CAST(s.kickoff_ts AS DATE) >= ms.start_date
+   AND CAST(s.kickoff_ts AS DATE) <= COALESCE (ms.end_date, DATE '9999-12-31')
+JOIN teams t ON t.team_id = s.team_id
+WHERE s.ht_for < s.ht_against
+GROUP bY ms.spell_id, ms.manager_name, t.team_name
+ORDER BY bodovi DESC, pobede DESC;
+
+-- Zoran Tošić, 18 bodova
