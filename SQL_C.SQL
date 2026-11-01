@@ -62,7 +62,70 @@ LIMIT 3;
 
 -- 3. За сваки клуб, ко је дао последњи гол клуба у сезони 2024/25 и када? Који клуб је последњи
 -- гол дао најраније?
+WITH golovi AS (
+    SELECT e.team_id, p.first_name, p.last_name, e.minute, m.kickoff_ts,
+        ROW_NUMBER() OVER (PARTITION BY e.team_id
+            ORDER BY m.kickoff_ts DESC, e.minute DESC,
+            COALESCE(e.added_time, 0) DESC, e.event_id DESC) AS rn
+    FROM match_events e
+    JOIN matches m ON m.match_id = e.match_id
+    JOIN players p ON p.player_id = e.player_id
+    WHERE m.season = '2024/25' AND e.event_type IN ('goal', 'penalty_goal')
+),
+poslednji AS (
+    SELECT t.team_name AS klub, g.first_name, g.last_name, g.kickoff_ts, g.minute
+    FROM golovi g
+    JOIN teams t ON t.team_id = g.team_id
+    WHERE g.rn = 1
+)
+SELECT klub, first_name, last_name, CAST(kickoff_ts AS DATE) AS datum, minute AS minut,
+    RANK() OVER (ORDER BY kickoff_ts) AS r_najranije
+FROM poslednji
+ORDER BY r_najranije, klub;
+-- Poslednji gol su najranije postigao ELmsworth Wanderers,  2025-05-03, Marko Stankovic
+
+
 -- 4. За домаће утакмице клуба Northport United у сезони 2024/25 прикажите посету и промену у
 -- односу на претходну домаћу утакмицу. Где је највећи пад?
+WITH domace AS (
+    SELECT CAST(m.kickoff_ts AS DATE) AS datum, o.team_name AS protivnik,
+        m.attendance AS poseta,
+        LAG(m.attendance) OVER (ORDER BY m.kickoff_ts) AS prethodna_poseta
+    FROM matches m
+    JOIN teams t ON t.team_id = m.home_team_id
+    JOIN teams o ON o.team_id = m.away_team_id
+    WHERE t.team_name = 'Northport United' AND m.season = '2024/25' AND m.status = 'played'
+)
+SELECT datum, protivnik, poseta, prethodna_poseta,
+    poseta - prethodna_poseta AS promena,
+    ROUND(100.0 * (poseta - prethodna_poseta) / prethodna_poseta, 1) AS promena_pct
+FROM domace
+ORDER BY datum;
+
+-- najveci pad je utakmica protiv CAstlebrook United-a  10267 manje posetioca,  20.8% 
+
+
 -- 5. Пратите бодове клуба Northport City утакмицу по утакмицу у сезони 2024/25. У којој
 -- утакмици по реду и ког датума је прешао 50 бодова?
+
+WITH bodovi AS (
+    SELECT s.kickoff_ts, o.team_name AS protivnik, s.venue,
+        CONCAT(s.goals_for, ':', s.goals_against) AS rezultat,
+        CASE WHEN s.goals_for > s.goals_against THEN 3
+            WHEN s.goals_for = s.goals_against THEN 1 ELSE 0 END AS bodova,
+        ROW_NUMBER() OVER (ORDER BY s.kickoff_ts) AS utakmica_br,
+        SUM(CASE WHEN s.goals_for > s.goals_against THEN 3
+                WHEN s.goals_for = s.goals_against THEN 1 ELSE 0 END)
+           OVER (ORDER BY s.kickoff_ts ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS ukupno_bodova
+    FROM team_matches as s
+    JOIN teams as t ON t.team_id = s.team_id
+    JOIN teams as o ON o.team_id = s.opponent_id
+     WHERE t.team_name = 'Northport City' AND s.season = '2024/25'
+)
+SELECT utakmica_br, CAST(kickoff_ts AS DATE) AS datum, protivnik, venue, rezultat, bodova, ukupno_bodova
+FROM bodovi
+WHERE ukupno_bodova > 50
+ORDER BY utakmica_br
+LIMIT 1;
+
+-- 2025-01-12 protiv Ashford,  4-1 rezultat
